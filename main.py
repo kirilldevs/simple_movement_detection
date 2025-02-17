@@ -4,32 +4,45 @@ import imutils
 import time
 import os
 
-PHOTO_COOLDOWN_SEC = 10
+# ==== CONFIGURABLE PARAMETERS ====
+
+PHOTO_COOLDOWN_SEC = 10  # Time interval (in seconds) between saved photos to avoid excessive captures
+FRAME_UPDATE_INTERVAL = 50  # Number of frames before updating the background model (helps adapt to scene changes)
+MOTION_CONTOUR_AREA = 500  # Minimum contour area for detecting motion (adjust for sensitivity)
+MOTION_PERSISTENCE_FRAMES = 3  # Number of consecutive frames where motion is detected before triggering an alert
+CAMERA_WARMUP_TIME = 2  # Seconds to wait after initializing the camera before processing frames
+FRAME_WIDTH = 500  # Width to resize the video frame for faster processing
+GAUSSIAN_BLUR_KERNEL = (11, 11)  # Kernel size for Gaussian blur (helps reduce noise)
+EDGE_DETECTION_THRESHOLDS = (30, 150)  # Canny edge detection min and max thresholds
+MOTION_THRESHOLD_VALUE = 20  # Threshold for detecting differences between frames
+
+# ==== SETUP ====
 
 # Folder to save captured images
 if not os.path.exists("captured_movement"):
     os.makedirs("captured_movement")
 
 def save_photo(frame, count):
+    """Saves a photo with a timestamp when motion is detected."""
     timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
     filename = f"captured_movement/motion_{count}_{timestamp}.jpg"
     cv2.imwrite(filename, frame)
     print(f"Photo saved: {filename}")
 
-def send_alert(counter):
-    print(f"Motion detected! Sending alert... (Count: {counter})")
+def send_alert():
+    """Prints an alert message when motion is detected."""
+    print("Motion detected! Sending alert...")
+
 
 # Initialize the camera
 cap = cv2.VideoCapture(0)
-time.sleep(2)  # Allow the camera to warm up
+time.sleep(CAMERA_WARMUP_TIME)  # Allow the camera to warm up
 
 first_frame = None
 motion_counter = 0
 detection_count = 0
-frame_update_interval = 50  # Update background every 50 frames
-frame_counter = 0  # Track total frames processed
-photo_cooldown = PHOTO_COOLDOWN_SEC  # Take a photo only every 3 seconds
-last_photo_time = time.time()  # Track last photo time
+frame_counter = 0  # Tracks total frames processed
+last_photo_time = time.time()  # Tracks last time a photo was saved
 
 while True:
     ret, frame = cap.read()
@@ -37,66 +50,66 @@ while True:
         break
 
     # Resize for faster processing
-    frame = imutils.resize(frame, width=500)
+    frame = imutils.resize(frame, width=FRAME_WIDTH)
 
     # Convert to grayscale and apply Gaussian blur
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    gray = cv2.GaussianBlur(gray, (11, 11), 0)  # Slightly higher blur for noise reduction
+    gray = cv2.GaussianBlur(gray, GAUSSIAN_BLUR_KERNEL, 0)  # Helps reduce noise
 
-    # Initialize the first frame
+    # Initialize the first frame for background comparison
     if first_frame is None:
         first_frame = gray
         continue
 
-    # Compute absolute difference between frames
+    # Compute absolute difference between the current frame and the background
     frame_delta = cv2.absdiff(first_frame, gray)
 
-    # Apply edge detection to better detect small movements
-    edges = cv2.Canny(frame_delta, 30, 150)  # Edge detection on frame difference
+    # Apply edge detection to improve small motion detection
+    edges = cv2.Canny(frame_delta, *EDGE_DETECTION_THRESHOLDS)
 
-    # Thresholding to detect actual movement
-    thresh = cv2.threshold(frame_delta, 20, 255, cv2.THRESH_BINARY)[1]
+    # Apply thresholding to highlight motion areas
+    thresh = cv2.threshold(frame_delta, MOTION_THRESHOLD_VALUE, 255, cv2.THRESH_BINARY)[1]
     thresh = cv2.dilate(thresh, None, iterations=2)
 
-    # Combine threshold and edges for better motion detection
+    # Combine thresholding and edge detection for better motion analysis
     combined = cv2.bitwise_or(thresh, edges)
 
-    # Find contours
+    # Find contours of moving objects
     contours = cv2.findContours(combined.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     contours = imutils.grab_contours(contours)
 
     motion_detected = False
     for contour in contours:
-        if cv2.contourArea(contour) < 500:  # Lowered to detect small movements
-            continue
+        if cv2.contourArea(contour) < MOTION_CONTOUR_AREA:
+            continue  # Ignore small movements
         motion_detected = True
         (x, y, w, h) = cv2.boundingRect(contour)
         cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
-    # Trigger alert if motion persists for several frames
+    # Trigger alert if motion is detected for a set number of consecutive frames
     if motion_detected:
         motion_counter += 1
-        if motion_counter >= 3:  # Require 3 consecutive frames instead of 5
+        if motion_counter >= MOTION_PERSISTENCE_FRAMES:
             detection_count += 1
-            send_alert(detection_count)
+            send_alert()
 
-            # Capture a photo only if enough time has passed (to avoid spamming)
+            # Capture a photo only if enough time has passed
             current_time = time.time()
-            if current_time - last_photo_time >= photo_cooldown:
+            if current_time - last_photo_time >= PHOTO_COOLDOWN_SEC:
                 save_photo(frame, detection_count)
                 last_photo_time = current_time  # Reset the timer
     else:
         motion_counter = 0  # Reset counter if no motion
 
-    # **Update the background every 50 frames to prevent outdated reference**
+    # Update the background model periodically to adjust to new scene conditions
     frame_counter += 1
-    if frame_counter % frame_update_interval == 0:
+    if frame_counter % FRAME_UPDATE_INTERVAL == 0:
         first_frame = gray.copy()
 
-    # Show frames
+    # Display frames for debugging
     cv2.imshow("Motion Detection", frame)
     cv2.imshow("Threshold", thresh)
-    cv2.imshow("Edges", edges)  # Debugging view of edges
+    cv2.imshow("Edges", edges)
 
     key = cv2.waitKey(1) & 0xFF
     if key == ord("q"):
