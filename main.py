@@ -24,7 +24,7 @@ if not os.path.exists("captured_movement"):
 
 def save_photo(frame, count):
     """Saves a photo with a timestamp when motion is detected."""
-    timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
+    timestamp = time.strftime("%d-%m-%Y_%H-%M-%S")
     filename = f"captured_movement/motion_{count}_{timestamp}.jpg"
     cv2.imwrite(filename, frame)
     print(f"Photo saved: {filename}")
@@ -32,7 +32,6 @@ def save_photo(frame, count):
 def send_alert():
     """Prints an alert message when motion is detected."""
     print("Motion detected! Sending alert...")
-
 
 # Initialize the camera
 cap = cv2.VideoCapture(0)
